@@ -1,5 +1,5 @@
 from telethon import TelegramClient
-from telethon import functions
+from telethon import functions, errors
 from telethon.tl.types import *
 from dotenv import load_dotenv
 import asyncio
@@ -14,6 +14,22 @@ api_hash = os.getenv("API_HASH")
 
 
 client = TelegramClient("session_name", api_id, api_hash)
+
+default_admin = ChatAdminRights(
+    change_info=True,
+    post_messages=True,
+    edit_messages=True,
+    delete_messages=True,
+    ban_users=True,
+    invite_users=True,
+    pin_messages=True,
+    manage_call=True,
+    other=True,
+    manage_topics=True,
+    post_stories=True,
+    edit_stories=True,
+    delete_stories=True,
+)
 
 
 async def getGroups():
@@ -31,6 +47,39 @@ async def getGroups():
         and not (hasattr(d.entity, "migrated_to") and d.entity.migrated_to)
         and (d.entity.creator or d.entity.admin_rights)
     ]
+
+
+async def getUserByUsername(group, username):
+    """
+    Get the user ID of a Telegram user in a group by their username.
+
+    Args:
+        group (int): The ID of the Telegram group.
+        username (str): The username of the user to search for.
+
+    Returns:
+        int: The ID of the user.
+
+    Raises:
+        ValueError: If the user is not found or an invalid index is entered.
+    """
+    possible = await client.get_participants(group, limit=10, search=username)
+    if not possible:
+        raise ValueError("User not found")
+
+    # Try to find exact match
+    for i in range(len(possible)):
+        if possible[i].username == username:
+            return possible[i].id
+
+    # Fuzzy match
+    for i in range(len(possible)):
+        user = possible[i]
+        print(f"{i} {user.username} - {user.first_name} {user.last_name}")
+    index = int(input("Enter the index of the user: "))
+    if index < 0 or index >= len(possible):
+        raise ValueError("Invalid index")
+    return possible[index].id
 
 
 async def listTitles(admins):
@@ -77,6 +126,7 @@ async def removeAdmin(admins, userIndex, group):
     """
     user = admins[userIndex]
     await client.edit_admin(group, user.id, is_admin=False)
+    print(f"Removed admin role from {user.first_name} {user.last_name}")
 
 
 async def changeRank(admins, userIndex, group):
@@ -95,9 +145,32 @@ async def changeRank(admins, userIndex, group):
     rights = user.participant.admin_rights
     rank = input(f"Enter new rank for {user.first_name} {user.last_name}: ")
     # await client.edit_admin(group, user.id, title=rank)
+    try:
+        await client(
+            functions.channels.EditAdminRequest(
+                channel=group, user_id=user.id, admin_rights=rights, rank=rank
+            )
+        )
+    except errors.rpcerrorlist.AdminRankInvalidError as err:
+        print(err)
+
+
+async def addAdmin(group):
+    """
+    Adds an admin to the specified group.
+
+    Parameters:
+    - group: The group/channel to add the admin to.
+
+    Returns:
+    - None
+    """
+    username = input("Enter the username of the user to add: ")
+    user_id = await getUserByUsername(group, username)
+    rank = input(f"Enter the rank for {username}: ")
     await client(
         functions.channels.EditAdminRequest(
-            channel=group, user_id=user.id, admin_rights=rights, rank=rank
+            channel=group, user_id=user_id, admin_rights=default_admin, rank=rank
         )
     )
 
@@ -126,6 +199,7 @@ async def loop(group):
         """Commands:
 edit <index> - Edit the title of an admin
 remove <index> - Remove an admin
+add - Add an admin
 print - Print the list of admins
 exit - Exit the program"""
     )
@@ -138,6 +212,8 @@ exit - Exit the program"""
         elif command[0] == "remove" and len(command) == 2:
             index = int(command[1])
             await removeAdmin(admins, index, group)
+        elif command[0] == "add":
+            await addAdmin(group)
         elif command[0] == "print":
             admins = await getAdmins(group)
             await listTitles(admins)

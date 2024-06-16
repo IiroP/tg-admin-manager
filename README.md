@@ -6,10 +6,10 @@ This script can be used to manage admin roles in Telegram groups.
 
 - Change title of existing admin
 - Remove admins
+- Add new admins
 
 ## TODO
 
-- Adding new admins
 - Validation & error handling
 
 ## Requirements
